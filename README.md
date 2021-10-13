@@ -91,10 +91,10 @@ To build the project and examples, do
 
 ```
 # Clone the repo and initialize the submodule.
-git clone https://github.com/tycksak/laugh && git submodule update --init
+git clone https://github.com/tycksak/laugh && cd laugh && git submodule update --init
 # Invoke CMake in the root directory. Builds all the examples for you too.
-cmake -DCMAKE_CXX_COMPILER=«Path to compliant compiler, if not in $PATH already» ./laugh
-cd laugh && make
+cmake -DCMAKE_CXX_COMPILER=«Path to compliant compiler, if not in $PATH already» .
+make all
 ```
 
 To build the docs, do
