@@ -1,8 +1,23 @@
 # Light Actor Framework
 
-Concurrency is a breeze.
+Concurrency is a breeze. Also a nightmare, if you ever used synchronization
+techniques. Mostly a nightmare, though. This tiny library allows you to
+forego sync primitives in favor of object-oriented concurrent _actors_,
+executing independently from each other in parallel and receiving
+_messages_ to react to - one at a time each.
 
 Take a listen.
+
+## Quick feature rundown
+ - Quick and scalable concurrency
+ - Memory-cheap actors for concurrent execution instead
+   of heavy `std::thread` objects.
+ - Cross-platform, C++20 compliant.
+ - Hot-swap actors at any time to respond to messages differently.
+ - _Don't ask for permission, ask for forgiveness._ Thrown exceptions are
+   handled by parent actors up the chain.
+ - Restart actors on failure seamlessly.
+ - Synchronous access to any actor on demand, if your situation requires it.
 
 ```cpp
 #include <iostream>
@@ -55,17 +70,6 @@ For more information on actors as concurrency units, you'll find plenty
 on the internet. A good place to get to know actors is
 [Akka](https://akka.io), which this project is trying to ape a bit (and
 fail horribly at it).
-
-## Quick feature rundown
- - Quick and scalable concurrency
- - Memory-cheap actors for concurrent execution instead
-   of heavy `std::thread` objects.
- - Cross-platform, C++20 compliant.
- - Hot-swap actors at any time to respond to messages differently.
- - _Don't ask for permission, ask for forgiveness._ Thrown exceptions are
-   handled by parent actors up the chain.
- - Restart actors on failure seamlessly.
- - Synchronous access to any actor on demand, if your situation requires it.
 
 ## Build and requirements
 
