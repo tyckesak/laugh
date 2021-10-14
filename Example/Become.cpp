@@ -1,5 +1,6 @@
 #include <string>
-#include "Actor.inl"
+
+#include <Laugh/Actor.inl>
 
 using namespace laugh;
 

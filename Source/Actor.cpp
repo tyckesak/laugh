@@ -1,4 +1,4 @@
-#include "Actor.inl"
+#include "Laugh/Actor.inl"
 
 #include <numeric>
 

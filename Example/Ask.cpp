@@ -1,6 +1,7 @@
 #include <deque>
 #include <algorithm>
-#include "Actor.inl"
+
+#include <Laugh/Actor.inl>
 
 using namespace laugh;
 
