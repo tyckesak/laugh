@@ -45,6 +45,8 @@ else()
     add_library(laugh Source/Actor.cpp)
 endif()
 
+add_dependencies(laugh concurrentqueue)
+
 set_target_properties(laugh PROPERTIES
     CXX_STANDARD 20
     CXX_STANDARD_REQUIRED TRUE
