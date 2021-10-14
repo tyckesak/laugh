@@ -18,4 +18,5 @@ Example/ask
 Example/become
 Example/pingpong
 
-Library/liblaugh.a
+Library/*
+Doxygen/*

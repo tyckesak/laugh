@@ -22,7 +22,7 @@ struct SlowPrimeWorker: Actor
         }
         else
         {
-            for(int i = 3; i < 1000000 && i <= n / 2; ++i)
+            for(int i = 3; i < 1000000 && i <= n / 2; i += 2)
             {
                 if(n % i == 0)
                 {
@@ -57,7 +57,7 @@ struct PatientBoss: Actor
     }
 
 
-    void DispatchFindPrime(int prime)
+    MaybeLater<void> DispatchFindPrime(int prime)
     {
         if(m_workers.empty())
         {
@@ -75,8 +75,10 @@ struct PatientBoss: Actor
 
             // Return early. std::deque provokes undefined behavior if
             // it is empty and its .front() member function is called.
-            return;
+            return MaybeLater<void>{Stash};
         }
+
+        UnstashAll();
 
         // 'Ask' is only available as a protected method inside Actor
         // objects, since the response needs to run on the same ActorRef.
@@ -110,6 +112,8 @@ struct PatientBoss: Actor
         // Once the message has been sent, we can release the worker.
         // The message for him to work will reach him eventually.
         m_workers.pop_front();
+
+        return {};
     }
 
 

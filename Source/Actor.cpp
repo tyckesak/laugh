@@ -1,4 +1,4 @@
-#include "Actor.hpp"
+#include "Actor.inl"
 
 #include <numeric>
 
@@ -43,6 +43,7 @@ void ActorContext::WorkerRun(std::atomic_flag* isWorkerEnrolled)
 
     // By now, the atomic flag's destructor has likely already been
     // called, this is a dangling pointer.
+    // We do not need this flag anymore anyway.
     isWorkerEnrolled = nullptr;
 
     std::unique_ptr<Task> current;
@@ -122,6 +123,9 @@ ActorContext::~ActorContext()
 // }}}
 
 
+// ActorLock {{{
+
+
 ActorLock::ActorLock(ActorCell& cell):
     m_cell{cell}
   , m_lock{m_cell.m_blocking}
@@ -143,6 +147,11 @@ void ActorLock::RestartWithDefaultConstructor()
 }
 
 
+// }}}
+
+
+// ActorCell {{{
+
 void ActorCell::TerminateDyingActor()
 {
     m_dyingActor = nullptr;
@@ -161,6 +170,27 @@ ActorLock ActorCell::LockActor()
 }
 
 
+std::unique_ptr<ActorContext::Task> ActorCell::UnstashTask()
+{
+    if(m_stash.empty())
+    {
+        return nullptr;
+    }
+    else
+    {
+        std::unique_ptr<ActorContext::Task> ret{std::move(m_stash.front())};
+        m_stash.pop_front();
+        return std::move(ret);
+    }
+}
+
+
+void ActorCell::StashTask(std::unique_ptr<ActorContext::Task> task)
+{
+    m_stash.push_back(std::move(task));
+}
+
+
 ActorCell::ActorCell(const ActorRef<Actor>& parent
                    , ActorContext* context):
     m_parent{parent}
@@ -169,10 +199,6 @@ ActorCell::ActorCell(const ActorRef<Actor>& parent
   , m_actor{nullptr}
   , m_selfReference()
 {
-    if(!context)
-    {
-        throw 1;
-    }
 }
 
 
@@ -184,9 +210,37 @@ ActorCell::ActorCell(std::nullptr_t parent
   , m_actor{nullptr}
   , m_selfReference()
 {
-    if(!context)
+}
+
+// }}}
+
+
+// Actor {{{
+
+
+void Actor::UnstashAll()
+{
+    auto cell = Self().m_cell;
+    while(auto tsk = cell->UnstashTask())
     {
-        throw 1;
+        tsk->Let();
     }
 }
 
+
+void Actor::Unstash(int n)
+{
+    if(n < 0)
+    {
+        throw std::exception();
+    }
+
+    auto cell = Self().m_cell;
+    while(auto tsk = n --> 0? cell->UnstashTask() : nullptr)
+    {
+        tsk->Let();
+    }
+}
+
+
+// }}}

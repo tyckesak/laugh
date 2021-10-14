@@ -9,26 +9,41 @@
 #define Laugh_Actor_C317BB7F_D3FC_4A19_B6AB_CB26D5EEE948
 
 
+#include <list>
 #include <mutex>
-#include <shared_mutex>
 #include <atomic>
 #include <future>
 #include <memory>
 #include <thread>
+#include <iostream>
 #include <type_traits>
+#include <shared_mutex>
 #include <unordered_map>
 #include <condition_variable>
-#include <iostream>
 
-// Thank you cameron314 on Github!
+// Thank you cameron314 and co-contributors on Github!
 #include <concurrentqueue.h>
 
 
 namespace laugh
 {
 
-template <typename A>
-struct EventualResponse;
+
+///
+/// \brief Quality of reference binding to an Actor object managed
+///        through an ActorRef.
+///
+/// This distinction between reference binding qualities is the same
+/// found in the standard library: using `std::shared_ptr` prevents
+/// a managed objects to be destroyed as long as the pointer is in
+/// scope; `std::weak_ptr` does not.
+///
+enum struct ActorRefQuality
+{
+    Strong, Weak
+};
+
+
 
 struct Actor;
 struct ActorContext;
@@ -40,6 +55,31 @@ struct ActorContext;
 template <typename A>
 concept ActorLike = std::is_convertible_v<std::remove_cvref_t<A>*, Actor*>
                  || std::is_same_v<Actor, std::remove_cvref_t<A>>;
+
+
+template <ActorLike A, ActorRefQuality = ActorRefQuality::Strong>
+struct ActorRef;
+struct ActorCell;
+
+///
+/// \internal
+/// \brief Mutex type used to lock \link Actor `Actor`s \endlink
+///        in order to keep the invariant of sequential message
+///        processing intact.
+///
+using ActorMutex = std::recursive_mutex;
+
+template <typename A>
+struct EventualResponse;
+
+template <typename A>
+struct MaybeLater;
+
+struct Discard_t {};
+struct Stash_t {};
+
+constexpr inline auto Stash = Stash_t{};
+constexpr inline auto Discard = Discard_t{};
 
 
 ///
@@ -59,36 +99,79 @@ concept Callable = requires(C f, Args&&... args)
 };
 
 
-///
-/// \brief Quality of reference binding to an Actor object managed
-///        through an ActorRef.
-///
-/// This distinction between reference binding qualities is the same
-/// found in the standard library: using `std::shared_ptr` prevents
-/// a managed objects to be destroyed as long as the pointer is in
-/// scope; `std::weak_ptr` does not.
-///
-enum struct ActorRefQuality
+namespace detail
 {
-    Strong, Weak
+    template <typename A>
+    struct TypeVessel
+    {
+        using type = A;
+    };
+
+    template <typename>
+    struct DetectTemplateTemplate: std::false_type
+    {
+        template <template <typename...> typename>
+        struct EqualToTemplateTemplate: std::false_type {};
+    };
+
+    template <template <typename...> typename Nested, typename... Targs>
+    struct DetectTemplateTemplate<Nested<Targs...>>: std::true_type
+    {
+        using type = Nested<Targs...>;
+
+        template <typename>
+        struct ExtractFirst_s;
+
+        template <template <typename...> typename T, typename A, typename... S>
+        struct ExtractFirst_s<T<A, S...>>
+        {
+            using First = A;
+        };
+
+        template <template <typename...> typename S>
+        using Remap = S<Targs...>;
+
+        template <template <typename...> typename OtherNested, typename = void>
+        struct EqualToTemplateTemplate: std::false_type {};
+
+        template <template <typename...> typename OtherNested>
+        requires std::is_same_v<Nested<Targs...>, OtherNested<Targs...>>
+        struct EqualToTemplateTemplate<OtherNested>
+            : std::true_type {};
+    };
+
+    template <typename A>
+    auto DelayedReturnType_f()
+    {
+        if constexpr(DetectTemplateTemplate<A>::template EqualToTemplateTemplate<MaybeLater>::value)
+        {
+            return TypeVessel<typename DetectTemplateTemplate<A>
+                                     ::template ExtractFirst_s<A>
+                                     ::First>{};
+        }
+        else
+        {
+            return TypeVessel<A>{};
+        }
+    }
+
+    template <typename A>
+    using DelayedReturnType = typename decltype(DelayedReturnType_f<A>())::type;
+
+}
+
+
+///
+/// \brief Ability of a type to delay the return value in response to the sender.
+///
+template <typename Nested>
+concept DelayedReturn = requires
+{
+    // typename detail::DetectTemplateTemplate<Nested>::type;
+    requires detail::DetectTemplateTemplate<Nested>
+                   ::template EqualToTemplateTemplate<MaybeLater>::value;
 };
 
-
-template <typename A>
-struct EventualResponse;
-
-template <ActorLike A, ActorRefQuality = ActorRefQuality::Strong>
-struct ActorRef;
-
-struct ActorCell;
-
-///
-/// \internal
-/// \brief Mutex type used to lock \link Actor `Actor`s \endlink
-///        in order to keep the invariant of sequential message
-///        processing intact.
-///
-using ActorMutex = std::recursive_mutex;
 
 
 ///
@@ -583,6 +666,10 @@ private:
 };
 
 
+///
+/// \internal
+/// \brief Bookkeeping structure used internally that owns the actor.
+///
 struct ActorCell
 {
     friend ActorLock;
@@ -602,7 +689,9 @@ struct ActorCell
 
     ActorLock LockActor();
 
+    ///
     /// \brief Can this actor be reset to a clean object without explicit arguments?
+    ///
     bool IsAutomaticallyResettable() const;
 
     template <ActorLike A = Actor>
@@ -620,6 +709,9 @@ struct ActorCell
 
     std::unique_ptr<Actor>& GetActor() { return m_actor; }
 
+    std::unique_ptr<ActorContext::Task> UnstashTask();
+    void StashTask(std::unique_ptr<ActorContext::Task> task);
+
 private:
 
     ActorRef<Actor, ActorRefQuality::Weak> m_selfReference;
@@ -627,6 +719,7 @@ private:
     std::unique_ptr<Actor> m_actor;
     std::unique_ptr<Actor> m_dyingActor;
     std::unique_ptr<Actor> (* m_defaultConstruct)();
+    std::list<std::unique_ptr<ActorContext::Task>> m_stash;
     ActorMutex m_blocking;
     /// \brief Reference to context. Stays pretty much the same once set.
     ActorContext* m_context;
@@ -753,6 +846,32 @@ protected:
           S& Become(Args&&...) const;
 
 
+    ///
+    /// \brief Executes all messages that have been stashed using MaybeLater in the
+    ///        order they have been stashed in.
+    ///
+    /// During this time, the actor is unresponsive and is processing all messages it
+    /// has in its stash.
+    ///
+    /// \note Observe that the message types are compatible with the receiving actor's
+    ///       interface as described in that respective actor's class declaration.
+    ///       Failure to abide by interfaces might result in undefined behavior being provoked.
+    ///
+    void UnstashAll();
+
+
+    ///
+    /// \brief Unstashes the number of messages given in the argument, or - if
+    ///        there are less messages stashed than it is requested to unstash - 
+    ///        unstashes all messages.
+    ///
+    /// During this time, the actor is unresponsive and is processing all messages it
+    /// has stashed.
+    ///
+    /// \sa Actor::UnstashAll
+    ///
+    void Unstash(int n = 1);
+
 
     ///
     /// \brief Prepare this actor to be swapped out with given
@@ -810,6 +929,124 @@ private:
 };
 
 
+template <typename A>
+struct MaybeLater
+{
+    MaybeLater(const Stash_t):
+        m_optret{std::nullopt}
+      , m_keep{true}
+    {
+    }
+
+    MaybeLater(const Discard_t):
+        m_optret{std::nullopt}
+      , m_keep{false}
+    {
+    }
+
+    explicit(std::is_lvalue_reference_v<A>)
+    MaybeLater(A&& val):
+        m_optret{std::forward<A>(val)}
+      , m_keep{false}
+    {
+    }
+
+    template <typename B>
+    requires std::is_convertible_v<B, A>
+    MaybeLater(MaybeLater<B>&& other):
+        m_keep{other.IsMessageKept()}
+      , m_optret{std::move(other).operator A&&()}
+    {
+    }
+
+    template <typename B>
+    requires std::is_convertible_v<B, A>
+    MaybeLater(const MaybeLater<B>& other):
+        m_keep{other.IsMessageKept()}
+      , m_optret{other.operator A&()}
+    {
+    }
+
+
+    bool IsMessageKept() { return m_keep && !bool{m_optret}; }
+    bool HasValue() { return bool{m_optret}; }
+
+    operator A&() &
+    {
+        if constexpr(std::is_lvalue_reference_v<A>)
+        {
+            return m_optret->get();
+        }
+        else
+        {
+            return *m_optret;
+        }
+    }
+
+    operator A&&() &&
+    {
+        if constexpr(std::is_lvalue_reference_v<A>)
+        {
+            return m_optret->get();
+        }
+        else
+        {
+            return *std::move(m_optret);
+        }
+    }
+
+private:
+
+    using OptType =
+        std::conditional_t<std::is_lvalue_reference_v<A>
+                         , std::reference_wrapper<A>
+                         , A>;
+
+    std::optional<OptType> m_optret;
+    bool m_keep;
+};
+
+
+template <typename V>
+requires std::is_void_v<V>
+struct MaybeLater<V>
+{
+
+    MaybeLater(const Stash_t):
+        m_returnsUnit{false}
+      , m_keep{true}
+    {
+    }
+
+    MaybeLater(const Discard_t):
+        m_returnsUnit{false}
+      , m_keep{false}
+    {
+    }
+
+    MaybeLater():
+        m_returnsUnit{true}
+      , m_keep{false}
+    {
+    }
+
+    MaybeLater(MaybeLater<V>&) = default;
+    MaybeLater(MaybeLater<V>&&) = default;
+
+
+    bool IsMessageKept() { return m_keep && !m_returnsUnit; }
+    bool HasValue() { return m_returnsUnit; }
+
+private:
+    bool m_returnsUnit;
+    bool m_keep;
+};
+
+template <typename A>
+MaybeLater(A&&) -> MaybeLater<A>;
+template <typename = void>
+MaybeLater() -> MaybeLater<void>;
+
 
 template <typename T>
 struct EventualResponse
@@ -832,7 +1069,7 @@ struct EventualResponse
     };
 
     EventualResponse(ActorRef<Actor> whose
-                   , std::future<T>&& returned);
+                   , std::future<detail::DelayedReturnType<T>>&& returned);
 
     EventualResponse(EventualResponse&) = delete;
 
@@ -845,15 +1082,18 @@ struct EventualResponse
     ///
     /// \note Once registering a callback this way, the EventualResponse object
     ///       does not need to be kept inside the actor.
-    EventualResponse<T>& AndThen(std::function<typename AndThenComposeType<T>::type> f);
+    ///
+    EventualResponse<T>& AndThen(std::function<typename AndThenComposeType<detail::DelayedReturnType<T>>::type> f);
 
 
     template <typename C
             , typename... Args>
     requires Callable<C, Args...>
+          && (not DelayedReturn<C> or (std::is_copy_constructible_v<Args> and ...))
     struct FollowupMessage: ActorContext::Task
     {
-        using R = std::invoke_result_t<C, Args...>;
+        using RawR = std::invoke_result_t<C, Args...>;
+        using R = detail::DelayedReturnType<RawR>;
 
         void Let() override { LetCut(std::make_index_sequence<sizeof...(Args)>()); }
 
@@ -861,7 +1101,7 @@ struct EventualResponse
                       , std::promise<R>&& promise
                       , C f
                       , std::tuple<Args...>&& args
-                      , std::shared_ptr<EventualResponse<R>> responseHandle):
+                      , std::shared_ptr<EventualResponse<RawR>> responseHandle):
             m_wherein{std::move(wherein)}
           , m_promise{std::move(promise)}
           , m_f{std::move(f)}
@@ -874,7 +1114,7 @@ struct EventualResponse
         std::promise<R> m_promise;
         const C m_f;
         std::tuple<Args...> m_args;
-        const std::shared_ptr<EventualResponse<R>> m_responseHandle;
+        const std::shared_ptr<EventualResponse<RawR>> m_responseHandle;
 
     private:
         template <size_t... is>
@@ -886,7 +1126,48 @@ struct EventualResponse
                 auto& cell = lck.m_cell;
                 try
                 {
-                    if constexpr(std::is_void_v<R>)
+                    // Check if the return type is one of 'MaybeLater< «Return Type» >'
+                    if constexpr(DelayedReturn<RawR>)
+                    {
+                        // Since we are using a delayed return, all argument types
+                        // must be copyable, in order to have them at our disposal later,
+                        // should the receiver decide to rewind to this exact message at
+                        // some point in the future.
+                        MaybeLater<R> delayedPossibly
+                            = std::invoke(m_f, Args{std::get<is>(m_args)}...);
+
+                        if(delayedPossibly.HasValue())
+                        {
+                            if constexpr(std::is_void_v<R>)
+                            {
+                                m_promise.set_value();
+                            }
+                            else
+                            {
+                                m_promise.set_value(std::move(delayedPossibly));
+                            }
+                        }
+                        else if(delayedPossibly.IsMessageKept())
+                        {
+                            cell.StashTask(std::make_unique<std::remove_reference_t<decltype(*this)>>(
+                                        m_wherein
+                                      , std::move(m_promise)
+                                      , std::move(m_f)
+                                      , std::move(m_args)
+                                      , m_responseHandle));
+                            // Return early and try again once the actor decides to unstash
+                            // the message.
+                            return;
+                        }
+                        else
+                        {
+                            // Do nothing; the actor has decided to ignore this message.
+                            // Unwind the promise-future infrastructure and clean up asap.
+                            return;
+                        }
+
+                    }
+                    else if constexpr(std::is_void_v<R>)
                     {
                         std::invoke(m_f, std::forward<Args>(std::get<is>(m_args))...);
                         m_promise.set_value();
@@ -936,8 +1217,8 @@ private:
     void ScheduleResponse();
 
     ActorRef<Actor> m_recipient;
-    std::function<typename AndThenComposeType<T>::type> m_f;
-    std::future<T> m_returned;
+    std::function<typename AndThenComposeType<detail::DelayedReturnType<T>>::type> m_f;
+    std::future<detail::DelayedReturnType<T>> m_returned;
     std::mutex m_fset;
     bool m_isReplyFormulated, m_hasScheduledResponse;
 

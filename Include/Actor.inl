@@ -10,7 +10,7 @@ namespace laugh
 
 template <typename T>
 EventualResponse<T>::EventualResponse(ActorRef<Actor> recipient
-                                    , std::future<T>&& returned):
+                                    , std::future<detail::DelayedReturnType<T>>&& returned):
     m_recipient{std::move(recipient)}
   , m_returned{std::move(returned)}
   , m_isReplyFormulated{false}
@@ -20,7 +20,7 @@ EventualResponse<T>::EventualResponse(ActorRef<Actor> recipient
 
 
 template <typename A>
-EventualResponse<A>& EventualResponse<A>::AndThen(std::function<typename AndThenComposeType<A>::type> f)
+EventualResponse<A>& EventualResponse<A>::AndThen(std::function<typename AndThenComposeType<detail::DelayedReturnType<A>>::type> f)
 {
     std::lock_guard<std::mutex> lck{m_fset};
 
@@ -42,7 +42,7 @@ EventualResponse<A>& EventualResponse<A>::AndThen(std::function<typename AndThen
 template <typename A>
 void EventualResponse<A>::ScheduleResponse()
 {
-    if constexpr(std::is_void_v<A>)
+    if constexpr(std::is_void_v<detail::DelayedReturnType<A>>)
     {
         m_recipient.GetContext().ScheduleMessage(
             std::make_unique<FollowupMessage<std::remove_cvref_t<decltype(m_f)>>>(
@@ -255,7 +255,7 @@ requires Callable<R (S::*)(Params...), S&, std::remove_reference_t<Args>...>
     m_cell->GetContext()->ScheduleMessage(
         std::make_unique<typename EventualResponse<R>::template
                                   FollowupMessage<decltype(recall), std::remove_reference_t<Args>...>>(*this
-         , std::promise<R>{}
+         , std::promise<detail::DelayedReturnType<R>>{}
          , std::move(recall)
          , std::make_tuple(std::forward<Args>(args)...)
          , nullptr));
@@ -286,7 +286,7 @@ requires Callable<R (S::*)(Params...) const, const S&, std::remove_reference_t<A
     m_cell->GetContext()->ScheduleMessage(
         std::make_unique<typename EventualResponse<R>::template
                                   FollowupMessage<decltype(recall), std::remove_reference_t<Args>...>>(*this
-         , std::promise<R>{}
+         , std::promise<detail::DelayedReturnType<R>>{}
          , std::move(recall)
          , std::make_tuple(std::forward<Args>(args)...)
          , nullptr));
