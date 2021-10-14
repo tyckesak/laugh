@@ -62,11 +62,8 @@ target_include_directories(laugh
 install(TARGETS laugh
     PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/Laugh)
 
-if(LAUGH_INSTALL_CONCURRENTQUEUE_HEADERS)
-    install(FILES ${LAUGH_CCQ_HEADERS}
-        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/concurrentqueue/moodycamel)
-endif()
-
+install(FILES ${LAUGH_CCQ_HEADERS}
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/concurrentqueue/moodycamel)
 
 if(LAUGH_BUILD_DOCS)
     find_package(Doxygen)
