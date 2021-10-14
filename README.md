@@ -20,6 +20,8 @@ Take a listen.
  - Restart actors on failure seamlessly.
  - Synchronous access to any actor on demand, if your situation requires it.
 
+Here is a short taste.
+
 ```cpp
 #include <iostream>
 #include "Actor.inl"
@@ -84,7 +86,8 @@ compilers, since this project only depends on the standard library and the
 is itself C++11 compliant.
 
 _Note_ that Apple Clang 13.0.0 will not compile
-this as of October 13, 2021; I recommend getting a fresh Clang 13.0.0 build and
+this as of October 14, 2021, and neither will all Clang compilers of version 12
+and lower; on a Macintosh I recommend getting a fresh Clang 13.0.0 build and
 doing:
 
 ```
@@ -95,17 +98,29 @@ brew install llvm doxygen
 To build the project and examples, do
 
 ```
-# Clone the repo and initialize the submodule.
-git clone https://github.com/tyckesak/laugh && cd laugh && git submodule update --init
+# Clone the repo.
+git clone https://github.com/tyckesak/laugh && cd laugh
+
 # Invoke CMake in the root directory. Builds all the examples for you too.
-cmake -DCMAKE_CXX_COMPILER=«Path to compliant compiler, if not in $PATH already» .
-make all
+cmake -DCMAKE_CXX_COMPILER=«Path to compliant compiler» .
+
+# If you have a good C++20 compiler in your $PATH already, do only instead
+cmake .
+
+make
 ```
 
 To build the docs, do
 
 ```
 make docs
+```
+
+To build the [concurrentqueue](https://github.com/cameron314/concurrentqueue) module,
+do
+```
+# Also do this if you want to re-download the subproject.
+make concurrentqueue
 ```
 
 The examples and documentation will tell you the rest.

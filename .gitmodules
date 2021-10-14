@@ -1,3 +1,0 @@
-[submodule "Extern/concurrentqueue"]
-	path = Extern/concurrentqueue
-	url = https://github.com/cameron314/concurrentqueue

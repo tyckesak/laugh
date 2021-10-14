@@ -2,12 +2,30 @@ cmake_minimum_required(VERSION 3.21)
 
 project(laugh)
 
+include(ExternalProject)
+
 option(LAUGH_BUILD_EXAMPLES "Build examples in the Example/ folder" ON)
 option(LAUGH_BUILD_DOCS     "Build Doxygen documentation for the project" ON)
+option(LAUGH_BUILD_SHARED   "Build as shared library" ON)
 
-add_subdirectory(Extern/concurrentqueue)
 
-add_library(laugh Source/Actor.cpp)
+ExternalProject_Add(concurrentqueue
+    PREFIX ${PROJECT_SOURCE_DIR}/Extern
+    TMP_DIR      Extern/Temporary
+    SOURCE_DIR   Extern/concurrentqueue
+    BINARY_DIR   Extern/concurrentqueue-build
+    STAMP_DIR    Extern/concurrentqueue-stamp
+    DOWNLOAD_DIR Extern/concurrentqueue
+    INSTALL_COMMAND ""
+    GIT_REPOSITORY https://github.com/cameron314/concurrentqueue
+    GIT_TAG master)
+
+
+if(LAUGH_BUILD_SHARED)
+    add_library(laugh SHARED Source/Actor.cpp)
+else()
+    add_library(laugh Source/Actor.cpp)
+endif()
 
 set_target_properties(laugh PROPERTIES
     CXX_STANDARD 20
@@ -16,8 +34,9 @@ set_target_properties(laugh PROPERTIES
     ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/Library
     LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/Library)
 
-target_include_directories(laugh PUBLIC ${PROJECT_SOURCE_DIR}/Include)
-target_link_libraries(laugh concurrentqueue)
+target_include_directories(laugh
+    PUBLIC ${PROJECT_SOURCE_DIR}/Include
+           ${PROJECT_SOURCE_DIR}/Extern/concurrentqueue)
 
 if(LAUGH_BUILD_DOCS)
     find_package(Doxygen)
