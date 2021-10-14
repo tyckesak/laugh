@@ -54,10 +54,10 @@ struct User: Actor
 int main()
 {
     // Let a set of three OS threads do the message processing.
-    auto acts = std::make_unique<ActorContext>(3);
+    ActorContext acts{3};
     // Just create an actor like this. Even with arguments,
     // if you want to. And if the constructor allows it.
-    auto user = acts->Make<User>();
+    auto user = acts.Make<User>();
     
     // Done and done.
     user.Bang(&User::PlayAround);
