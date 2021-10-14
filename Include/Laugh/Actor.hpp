@@ -22,7 +22,7 @@
 #include <condition_variable>
 
 // Thank you cameron314 and co-contributors on Github!
-#include <concurrentqueue.h>
+#include <concurrentqueue/moodycamel/concurrentqueue.h>
 
 
 namespace laugh
