@@ -14,6 +14,7 @@ Take a listen.
    of heavy `std::thread` objects.
  - Cross-platform, C++20 compliant.
  - Hot-swap actors at any time to respond to messages differently.
+ - Stash and discard messages using the special return type `MaybeLater<A>`.
  - _Don't ask for permission, ask for forgiveness._ Thrown exceptions are
    handled by parent actors up the chain.
  - Restart actors on failure seamlessly.
