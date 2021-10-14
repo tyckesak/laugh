@@ -10,7 +10,7 @@ using namespace laugh;
 // right things pretty fast.
 struct SlowPrimeWorker: Actor
 {
-    bool IsPrime(int n)
+    MaybeLater<bool> IsPrime(int n)
     {
         if(n == 2)
         {

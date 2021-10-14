@@ -302,7 +302,7 @@ requires Callable<R (S::*)(Params...), S&, std::remove_reference_t<Args>...>
                                     , Args&&... args) const
       -> std::shared_ptr<EventualResponse<R>>
 {
-    std::promise<R> returnPush;
+    std::promise<detail::DelayedReturnType<R>> returnPush;
 
     std::shared_ptr<EventualResponse<R>> responseHandle{
         std::make_shared<EventualResponse<R>>(*this
