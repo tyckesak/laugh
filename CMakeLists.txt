@@ -2,9 +2,6 @@ cmake_minimum_required(VERSION 3.21)
 
 project(laugh)
 
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-set(CMAKE_BUILD_TYPE Debug)
-
 option(LAUGH_BUILD_EXAMPLES "Build examples in the Example/ folder" ON)
 option(LAUGH_BUILD_DOCS     "Build Doxygen documentation for the project" ON)
 
