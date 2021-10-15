@@ -79,9 +79,9 @@ fail horribly at it).
 You'll need a fairly compliant C++20 compiler and CMake. For generating
 the documentation, Doxygen will be necessary.
 
-I have tested this on Clang 13.0.0 on an Apple macOS machine, but I'm relatively
-certain that this project will compile without any hassle on the g++ and vc++
-compilers, since this project only depends on the standard library and the
+I have tested this on Clang 13.0.0 and g++-11 on an Apple macOS machine, but I'm
+confident that this project will compile without any hassle on the vc++
+compiler as well, since this project only depends on the standard library and the
 [concurrentqueue](https://github.com/cameron314/concurrentqueue) module, which
 is itself C++11 compliant.
 
