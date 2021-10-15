@@ -100,24 +100,25 @@ To build the project and examples, do
 ```
 # Clone the repo.
 git clone https://github.com/tyckesak/laugh
+cd laugh
 
 # If you don't have a recent enough C++20 compiler in your $PATH, append
 # the CMake flag '-DCMAKE_CXX_COMPILER=«Path to compiler»'
-cmake laugh
+cmake .
 
 # Then do
-cmake --build laugh
+cmake --build .
 ```
 
 For installing the library and the dependency headers, do
 ```
-cmake --install laugh
+cmake --install .
 ```
 
 To build the docs, do
 
 ```
-cmake --build laugh --target docs
+cmake --build . --target docs
 ```
 
 To re-download the [concurrentqueue](https://github.com/cameron314/concurrentqueue) module,
@@ -125,7 +126,7 @@ do
 ```
 # Might need to do this if the compiler can't find the
 # concurrentqueue headers.
-cmake --build laugh --target concurrentqueue
+cmake --build . --target concurrentqueue
 ```
 
 The examples and documentation will tell you the rest.
