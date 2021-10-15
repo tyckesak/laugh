@@ -1,4 +1,5 @@
 #include <string>
+#include <iostream>
 
 #include <Laugh/Actor.inl>
 
@@ -81,7 +82,4 @@ int main()
 
     std::cout << "Coffee time!" << std::endl;
 }
-
-
-
 

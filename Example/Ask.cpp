@@ -1,4 +1,5 @@
 #include <deque>
+#include <iostream>
 #include <algorithm>
 
 #include <Laugh/Actor.inl>
@@ -58,7 +59,7 @@ struct PatientBoss: Actor
     }
 
 
-    MaybeLater<void> DispatchFindPrime(int prime)
+    void DispatchFindPrime(int prime)
     {
         if(m_workers.empty())
         {
@@ -76,9 +77,17 @@ struct PatientBoss: Actor
 
             // Return early. std::deque provokes undefined behavior if
             // it is empty and its .front() member function is called.
-            return MaybeLater<void>{Stash};
+            //
+            // Since we might want to calculate that prime number
+            // later again, we stash this invocation.
+            return Stash;
+
+            // You might also try this, see what happens!
+            // return Discard;
         }
 
+        // Catch up on calculating those prime numbers that we could not do
+        // because of a worker shortage.
         UnstashAll();
 
         // 'Ask' is only available as a protected method inside Actor
@@ -134,6 +143,19 @@ int main()
     std::unique_ptr<ActorContext> acts{new ActorContext{3}};
 
     auto boss = acts->Make<PatientBoss>();
+
+    // Send messages asynchronously to the boss to calculate primes.
+    // Notice that we have not given him workers to calculate primes yet,
+    // so these messages will likely end up stashed.
+    boss.Bang(&PatientBoss::DispatchFindPrime, 3);
+    boss.Bang(&PatientBoss::DispatchFindPrime, 5);
+
+    // However, the following message might reach the boss first, after all.
+    // Important thing to remember: messages are not necessarily delivered
+    // in order.
+    //
+    // This is a fact so important that I want you to say it again.
+
 
     // Make 100 child workers (actors).
     boss.Bang(&PatientBoss::Hire, 100);

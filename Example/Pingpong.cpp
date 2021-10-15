@@ -1,3 +1,4 @@
+#include <iostream>
 #include <Laugh/Actor.inl>
 
 using namespace laugh;

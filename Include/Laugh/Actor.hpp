@@ -12,11 +12,9 @@
 #include <list>
 #include <mutex>
 #include <atomic>
-#include <future>
 #include <memory>
 #include <thread>
 #include <optional>
-#include <iostream>
 #include <type_traits>
 #include <shared_mutex>
 #include <unordered_map>
@@ -156,10 +154,10 @@ namespace detail
         }
     }
 
-    template <typename A>
-    using DelayedReturnType = typename decltype(DelayedReturnType_f<A>())::type;
-
 }
+
+template <typename A>
+using DelayedReturnType = typename decltype(detail::DelayedReturnType_f<A>())::type;
 
 
 ///
@@ -639,7 +637,7 @@ private:
         auto Ask(ActorRef<S> who
                , R (S::* const what)(Params...)
                , Args&&... with) const
-          -> std::shared_ptr<EventualResponse<R>>;
+          -> std::shared_ptr<EventualResponse<DelayedReturnType<R>>>;
 
 
     template <typename R
@@ -651,7 +649,7 @@ private:
         auto Ask(ActorRef<const S> who
                , R (S::* const what)(Params...) const
                , Args&&... with) const
-          -> std::shared_ptr<EventualResponse<R>>;
+          -> std::shared_ptr<EventualResponse<DelayedReturnType<R>>>;
 
     // }}}
 
@@ -806,7 +804,7 @@ protected:
         auto Ask(ActorRef<S> who
                , R (S::* const what)(Params...)
                , Args&&... with)
-          -> std::shared_ptr<EventualResponse<R>>;
+          -> std::shared_ptr<EventualResponse<DelayedReturnType<R>>>;
 
 
     ///
@@ -824,7 +822,7 @@ protected:
         auto Ask(ActorRef<T> who
                , R (S::* const what)(Params...) const
                , Args&&... with)
-          -> std::shared_ptr<EventualResponse<R>>;
+          -> std::shared_ptr<EventualResponse<DelayedReturnType<R>>>;
 
 
     ///
@@ -1061,22 +1059,52 @@ struct EventualResponse
     friend struct EventualResponse;
     friend ActorContext;
 
+
+    // Return Type Case Analysis {{{
+
     template <typename A>
-    struct AndThenComposeType
+    struct TypeTranslate
     {
-        using type = void(A);
+        // Specialization for lvalue references is further down still.
+        static_assert(not std::is_lvalue_reference_v<DelayedReturnType<A>>);
+
+        // Remove the possible rvalue reference from here...
+        using ResponseSchedulingArg_t = std::remove_reference_t<DelayedReturnType<A>>;
+        // ...but preserve it in the AndThen invocation.
+        using AndThenType_t = void(DelayedReturnType<A>);
     };
 
     template <typename A>
-    requires std::is_void_v<A>
-    struct AndThenComposeType<A>
+    requires std::is_void_v<DelayedReturnType<A>>
+    struct TypeTranslate<A>
     {
-        using type = void();
+        using ResponseSchedulingArg_t = std::nullptr_t;
+        using AndThenType_t = void();
     };
 
-    EventualResponse(ActorRef<Actor> whose
-                   , std::future<detail::DelayedReturnType<T>>&& returned);
+    template <typename A>
+    requires std::is_lvalue_reference_v<DelayedReturnType<A>>
+    struct TypeTranslate<A>
+    {
+        using ResponseSchedulingArg_t = std::reference_wrapper<std::remove_reference_t<A>>;
+        using AndThenType_t = void(DelayedReturnType<A>);
+    };
 
+    // }}}
+
+
+    ///
+    /// \brief Function type for the callback argument used in EventualResponse::AndThen
+    ///
+    template <typename A>
+    using AndThenType = std::function<typename TypeTranslate<A>::AndThenType_t>;
+
+
+    ///
+    /// \param whose The sender of the original message, to which
+    ///        the eventual answer should be delivered.
+    ///
+    EventualResponse(ActorRef<Actor> whose);
     EventualResponse(EventualResponse&) = delete;
 
 
@@ -1087,145 +1115,47 @@ struct EventualResponse
     /// \throw std::exception if callback has already been set.
     ///
     /// \note Once registering a callback this way, the EventualResponse object
-    ///       does not need to be kept inside the actor.
+    ///       does not need to be retained inside the actor.
     ///
-    EventualResponse<T>& AndThen(std::function<typename AndThenComposeType<detail::DelayedReturnType<T>>::type> f);
+    EventualResponse<T>* AndThen(AndThenType<T> f);
 
 
+    ///
+    /// \brief Task type taking care of looping back the return value
+    ///        from a message back to the sender, making sure that
+    ///        any callbacks registered inside the sender are executed
+    ///        inside the actor's event loop.
+    ///
+    ///
+    ///
+    /// \tparam C The callable object's type.
+    /// \tparam Args Argument types to the callable object.
+    ///
     template <typename C
             , typename... Args>
     requires Callable<C, Args...>
           && (not DelayedReturn<C> or (std::is_copy_constructible_v<Args> and ...))
-    struct FollowupMessage: ActorContext::Task
-    {
-        using RawR = std::invoke_result_t<C, Args...>;
-        using R = detail::DelayedReturnType<RawR>;
-
-        void Let() override { LetCut(std::make_index_sequence<sizeof...(Args)>()); }
-
-        FollowupMessage(ActorRef<Actor> wherein
-                      , std::promise<R>&& promise
-                      , C f
-                      , std::tuple<Args...>&& args
-                      , std::shared_ptr<EventualResponse<RawR>> responseHandle):
-            m_wherein{std::move(wherein)}
-          , m_promise{std::move(promise)}
-          , m_f{std::move(f)}
-          , m_args{std::move(args)}
-          , m_responseHandle{responseHandle}
-        {
-        };
-
-        const ActorRef<Actor> m_wherein;
-        std::promise<R> m_promise;
-        const C m_f;
-        std::tuple<Args...> m_args;
-        const std::shared_ptr<EventualResponse<RawR>> m_responseHandle;
-
-    private:
-        template <size_t... is>
-        void LetCut(const std::index_sequence<is...>)
-        {
-            bool failed = false;
-            {
-                auto lck = m_wherein.LockActor();
-                auto& cell = lck.m_cell;
-                try
-                {
-                    // Check if the return type is one of 'MaybeLater< «Return Type» >'
-                    if constexpr(DelayedReturn<RawR>)
-                    {
-                        // Since we are using a delayed return, all argument types
-                        // must be copyable, in order to have them at our disposal later,
-                        // should the receiver decide to rewind to this exact message at
-                        // some point in the future.
-                        MaybeLater<R> delayedPossibly
-                            = std::invoke(m_f, Args{std::get<is>(m_args)}...);
-
-                        if(delayedPossibly.HasValue())
-                        {
-                            if constexpr(std::is_void_v<R>)
-                            {
-                                m_promise.set_value();
-                            }
-                            else
-                            {
-                                m_promise.set_value(std::move(delayedPossibly));
-                            }
-                        }
-                        else if(delayedPossibly.IsMessageKept())
-                        {
-                            cell.StashTask(std::make_unique<std::remove_reference_t<decltype(*this)>>(
-                                        m_wherein
-                                      , std::move(m_promise)
-                                      , std::move(m_f)
-                                      , std::move(m_args)
-                                      , m_responseHandle));
-                            // Return early and try again once the actor decides to unstash
-                            // the message.
-                            return;
-                        }
-                        else
-                        {
-                            // Do nothing; the actor has decided to ignore this message.
-                            // Unwind the promise-future infrastructure and clean up asap.
-                            return;
-                        }
-
-                    }
-                    else if constexpr(std::is_void_v<R>)
-                    {
-                        std::invoke(m_f, std::forward<Args>(std::get<is>(m_args))...);
-                        m_promise.set_value();
-                    }
-                    else
-                    {
-                        m_promise.set_value(std::invoke(m_f, std::forward<Args>(std::get<is>(m_args))...));
-                    }
-                }
-                catch(const std::exception& e)
-                {
-                    failed = true;
-                    std::cerr << "Error in message " << e.what() << std::endl;
-                    cell.Get()->Deactivate();
-                    m_promise.set_exception(std::current_exception());
-                    if(!m_wherein.GetParent())
-                    {
-                        std::rethrow_exception(std::current_exception());
-                    }
-                    m_wherein.GetParent().Bang(&Actor::OnChildFailed
-                                             , Actor::ChildFailure{.m_why = std::current_exception(), .m_failed = m_wherein});
-                }
-                cell.TerminateDyingActor();
-            }
-
-            const auto& resp = m_responseHandle;
-
-            if(!resp || failed)
-            {
-                return;
-            }
-
-            std::lock_guard<std::mutex> lck{resp->m_fset};
-
-            resp->m_isReplyFormulated = true;
-
-            if(resp->m_f)
-            {
-                resp->ScheduleResponse();
-            }
-        }
-    };
+    struct FollowupMessage;  // The EventualResponse's type parameter
+                             // does not occur in the declaration of
+                             // the FollowupMessage...
 
 
 private:
 
+
+    template <typename A>
+    using ResponseSchedulingArg = typename TypeTranslate<A>::ResponseSchedulingArg_t;
+
+
+    void ScheduleResponse(ResponseSchedulingArg<T>&&);
     void ScheduleResponse();
 
     ActorRef<Actor> m_recipient;
-    std::function<typename AndThenComposeType<detail::DelayedReturnType<T>>::type> m_f;
-    std::future<detail::DelayedReturnType<T>> m_returned;
+    AndThenType<T> m_f;
+    std::unique_ptr<ResponseSchedulingArg<T>> m_returned;
     std::mutex m_fset;
+
+    // TODO Replace those with bitflags, optimize memory usage.
     bool m_isReplyFormulated, m_hasScheduledResponse;
 
 };
