@@ -15,6 +15,7 @@
 #include <future>
 #include <memory>
 #include <thread>
+#include <optional>
 #include <iostream>
 #include <type_traits>
 #include <shared_mutex>
@@ -1030,7 +1031,12 @@ struct MaybeLater<V>
     {
     }
 
-    MaybeLater(MaybeLater<V>&) = default;
+    MaybeLater(MaybeLater<V>& other):
+        m_returnsUnit{other.HasValue()}
+      , m_keep{!m_returnsUnit && other.IsMessageKept()}
+    {
+    }
+
     MaybeLater(MaybeLater<V>&&) = default;
 
 
