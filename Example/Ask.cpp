@@ -44,7 +44,7 @@ struct PatientBoss: Actor
     int foundPrimes = 0;
 
 
-    MaybeLater<void> Hire(int workers)
+    void Hire(int workers)
     {
         while(workers --> 0)
         {
@@ -59,7 +59,7 @@ struct PatientBoss: Actor
     }
 
 
-    void DispatchFindPrime(int prime)
+    MaybeLater<void> DispatchFindPrime(int prime)
     {
         if(m_workers.empty())
         {
