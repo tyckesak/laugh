@@ -131,6 +131,20 @@ cmake --build . --target concurrentqueue
 
 The examples and documentation will tell you the rest.
 
+## Project structure
+
+I try to keep a clean online repo with as few files as possible to make
+exploration easier - upon building the project on your local machine
+however, you'll see a couple more files and directories spring into
+existence inside the project root directory, including - but not limited to
+
+ - `Extern/` - external project dependencies are cloned there, i.e. [concurrentqueue](https://github.com/cameron314/concurrentqueue)
+ - `Library/` - the directory containing the shared/static library after building
+ - `Doxygen/` - contains the Doxygen generated doc files
+ - Makefiles for your platform
+ - Documentation cache files created by Doxygen
+ - `CMakeFiles/` - intermediate object files
+
 ## Why that name?
 
 I thought I would do a quick sketch of what a code-light C++ actor framework would
