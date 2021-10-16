@@ -137,7 +137,7 @@ private:
                             // Make sure a std::reference_wrapper takes the reference in,
                             // since std containers generally don't play nice with
                             // lvalue reference types.
-                            responseForwarded.template emplace<std::reference_wrapper<R>>(delayedPossibly.operator R&());
+                            responseForwarded.template emplace<std::reference_wrapper<std::remove_reference_t<R>>>(delayedPossibly.operator R&());
                         }
                         else
                         {
@@ -191,8 +191,8 @@ private:
                 }
                 else if constexpr(std::is_lvalue_reference_v<R>)
                 {
-                    responseForwarded.template emplace<std::reference_wrapper<R>>(
-                            std::invoke(m_f, std::forward<Args>(std::get<is>(m_args))...));
+                    responseForwarded.template emplace<std::reference_wrapper<std::remove_reference_t<R>>>(std::ref(
+                            std::invoke(m_f, std::forward<Args>(std::get<is>(m_args))...)));
                 }
                 else
                 {
