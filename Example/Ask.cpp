@@ -12,7 +12,7 @@ using namespace laugh;
 // right things pretty fast.
 struct SlowPrimeWorker: Actor
 {
-    MaybeLater<bool> IsPrime(int n)
+    bool IsPrime(int n)
     {
         if(n == 2)
         {
@@ -44,7 +44,7 @@ struct PatientBoss: Actor
     int foundPrimes = 0;
 
 
-    void Hire(int workers)
+    MaybeLater<void> Hire(int workers)
     {
         while(workers --> 0)
         {
