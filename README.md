@@ -146,7 +146,7 @@ architecture and OS used to compile it on.
  - One `ActorRef<A>` takes up 16 bytes of space.
  - The internal bookkeeping structure occupies 160 bytes, and its memory
    is separate from your own `Actor`s.
- - One sent message is about ~70-80 bytes in size plus storage for each of
+ - One sent message is about ~50 bytes in size plus storage for each of
    your arguments passed alongside it.
  - If playing with the thought to be called back when the receiver responds, plan with
    an additional 144 bytes for the `EventualResponse<A>`.
