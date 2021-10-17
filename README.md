@@ -131,6 +131,26 @@ cmake --build . --target concurrentqueue
 
 The examples and documentation will tell you the rest.
 
+## Memory footprint
+
+Whenever a foreign library owns your memory, it might be a good idea to
+ask how much memory it occupies and in what way. I am planning for allocator
+support some time in the future; in the meantime, I have taken to finding out
+how much memory each of the critical pieces of infrastructure use. The numbers
+below have been obtained by compiling the project and examples under a Macintosh
+x64 using the `g++` 11 compiler - the results might change depending on the compiler,
+architecture and OS used to compile it on.
+
+ - `Actor`'s minimum footprint is 32 bytes plus x, depending on how many
+   members your actor subclasses add.
+ - One `ActorRef<A>` takes up 16 bytes of space.
+ - The internal bookkeeping structure occupies 160 bytes, and its memory
+   is separate from your own `Actor`s.
+ - One sent message is about ~70-80 bytes in size plus storage for each of
+   your arguments passed alongside it.
+ - If playing with the thought to be called back when the receiver responds, plan with
+   an additional 144 bytes for the `EventualResponse<A>`.
+
 ## Project structure
 
 I try to keep a clean online repo with as few files as possible to make
