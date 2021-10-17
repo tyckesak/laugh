@@ -74,11 +74,17 @@ void ActorContext::WorkerRun(std::atomic_flag* isWorkerEnrolled)
         if(current)
         {
             current->Let();
-            current = nullptr;
+        }
+
+        m_hasWork.notify_all();
+
+        if(!current)
+        {
+            break;
         }
         else
         {
-            return;
+            current = nullptr;
         }
     }
 }

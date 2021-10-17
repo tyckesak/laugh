@@ -12,6 +12,7 @@
 #include <list>
 #include <mutex>
 #include <atomic>
+#include <bitset>
 #include <memory>
 #include <thread>
 #include <optional>
@@ -1071,7 +1072,7 @@ struct EventualResponse
         // Remove the possible rvalue reference from here...
         using ResponseSchedulingArg_t = std::remove_reference_t<DelayedReturnType<A>>;
         // ...but preserve it in the AndThen invocation.
-        using AndThenType_t = void(DelayedReturnType<A>);
+        using AndThenType_t = void(ActorRef<Actor>, DelayedReturnType<A>);
     };
 
     template <typename A>
@@ -1079,7 +1080,7 @@ struct EventualResponse
     struct TypeTranslate<A>
     {
         using ResponseSchedulingArg_t = std::nullptr_t;
-        using AndThenType_t = void();
+        using AndThenType_t = void(ActorRef<Actor>);
     };
 
     template <typename A>
@@ -1087,7 +1088,7 @@ struct EventualResponse
     struct TypeTranslate<A>
     {
         using ResponseSchedulingArg_t = std::reference_wrapper<std::remove_reference_t<A>>;
-        using AndThenType_t = void(DelayedReturnType<A>);
+        using AndThenType_t = void(ActorRef<Actor>, DelayedReturnType<A>);
     };
 
     // }}}
@@ -1155,8 +1156,21 @@ private:
     std::unique_ptr<ResponseSchedulingArg<T>> m_returned;
     std::mutex m_fset;
 
-    // TODO Replace those with bitflags, optimize memory usage.
-    bool m_isReplyFormulated, m_hasScheduledResponse;
+    ///
+    /// \brief Superposition of flags depicting the internal state of the response
+    ///        scheduling.
+    ///
+    /// `m_replyFlags[i]` for `i = 0, 1` describes
+    ///  - `i = 0`: if the return value of the message has been stored in EventualResponse::m_returned
+    ///  - `i = 1`: if the message with the return value has already been sent back to sender
+    ///
+    /// So grateful for std::bitset that I don't have to fiddle with `&` and `|`
+    /// anymore.
+    ///
+    std::bitset<2> m_replyFlags;
+
+    std::bitset<2>::reference IsReplyFormulated() { return m_replyFlags[0]; }
+    std::bitset<2>::reference HasScheduledResponse() { return m_replyFlags[1]; }
 
 };
 

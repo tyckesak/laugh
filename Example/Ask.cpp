@@ -103,7 +103,10 @@ struct PatientBoss: Actor
             // the response callback, since this actor might replace its
             // ActorRef with another actor, might reset itself or
             // not exist anymore for other reasons.
-            ->AndThen([self = Self(), prime](bool isPrime)
+            // That is why it is required for the callback to take
+            // the self reference as the first parameter, so that
+            // the lambda can get a fresh pointer to itself.
+            ->AndThen([prime](ActorRef<Actor> self, bool isPrime)
         {
             std::cout << "Telegraph for you!  --  Thanks! " << prime
                       << " is " << (isPrime? "a " : "no") << " prime."
@@ -158,7 +161,7 @@ int main()
 
 
     // Make 100 child workers (actors).
-    boss.Bang(&PatientBoss::Hire, 100);
+    boss.Bang(&PatientBoss::Hire, 100 + 2);
 
     for(int i = 5000; i < 5000 + 100; ++i)
     {

@@ -63,8 +63,10 @@ struct Receiver: Actor
 
         for(int i = 0; i < 20; ++i)
         {
+            // The Ask member function is explained in detail in the
+            // Ask.cpp example.
             Ask(decide, &Alternate::WhichDirection)
-                ->AndThen([](const std::string& str)
+                ->AndThen([](ActorRef<Actor> self, const std::string& str)
             {
                 std::cout << str << std::endl;
             });

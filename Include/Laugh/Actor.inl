@@ -11,8 +11,6 @@ namespace laugh
 template <typename T>
 EventualResponse<T>::EventualResponse(ActorRef<Actor> recipient):
     m_recipient{std::move(recipient)}
-  , m_isReplyFormulated{false}
-  , m_hasScheduledResponse{false}
 {
 }
 
@@ -22,14 +20,14 @@ EventualResponse<A>* EventualResponse<A>::AndThen(AndThenType<A> f)
 {
     std::lock_guard<std::mutex> lck{m_fset};
 
-    if(m_hasScheduledResponse || m_f)
+    if(HasScheduledResponse() || m_f)
     {
         throw std::exception();
     }
 
     m_f = std::move(f);
 
-    if(m_isReplyFormulated)
+    if(IsReplyFormulated())
     {
         ScheduleResponse();
     }
@@ -45,22 +43,22 @@ void EventualResponse<A>
     if constexpr(std::is_void_v<DelayedReturnType<A>>)
     {
         m_recipient.GetContext().ScheduleMessage(
-            std::make_unique<FollowupMessage<std::remove_cvref_t<decltype(m_f)>>>(
-                std::move(m_recipient)
+            std::make_unique<FollowupMessage<std::remove_cvref_t<decltype(m_f)>, ActorRef<Actor>>>(
+                m_recipient
               , std::move(m_f)
-              , std::make_tuple()
+              , std::make_tuple(m_recipient)
               , nullptr));
     }
     else
     {
         m_recipient.GetContext().ScheduleMessage(
-            std::make_unique<FollowupMessage<std::remove_cvref_t<decltype(m_f)>, A>>(
-                std::move(m_recipient)
+            std::make_unique<FollowupMessage<std::remove_cvref_t<decltype(m_f)>, ActorRef<Actor>, A>>(
+                m_recipient
               , std::move(m_f)
-              , std::make_tuple(std::forward<ResponseSchedulingArg<A>>(arg))
+              , std::make_tuple(m_recipient, std::forward<ResponseSchedulingArg<A>>(arg))
               , nullptr));
     }
-    m_hasScheduledResponse = true;
+    HasScheduledResponse() = true;
 }
 
 
@@ -241,7 +239,7 @@ private:
 
         std::lock_guard<std::mutex> lck{resp->m_fset};
 
-        resp->m_isReplyFormulated = true;
+        resp->IsReplyFormulated() = true;
 
         // Has a callback to the response already been formulated by the sender?
         if(resp->m_f)
