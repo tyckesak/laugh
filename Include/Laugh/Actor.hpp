@@ -1134,7 +1134,7 @@ struct EventualResponse
     ///
     template <typename C
             , typename... Args>
-    requires Callable<C, Args...>
+    requires Callable<C, ActorRef<Actor>, Args...>
           && (not DelayedReturn<C> or (std::is_copy_constructible_v<Args> and ...))
     struct FollowupMessage;  // The EventualResponse's type parameter
                              // does not occur in the declaration of

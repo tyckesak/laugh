@@ -43,19 +43,19 @@ void EventualResponse<A>
     if constexpr(std::is_void_v<DelayedReturnType<A>>)
     {
         m_recipient.GetContext().ScheduleMessage(
-            std::make_unique<FollowupMessage<std::remove_cvref_t<decltype(m_f)>, ActorRef<Actor>>>(
+            std::make_unique<FollowupMessage<std::remove_cvref_t<decltype(m_f)>>>(
                 m_recipient
               , std::move(m_f)
-              , std::make_tuple(m_recipient)
+              , std::make_tuple()
               , nullptr));
     }
     else
     {
         m_recipient.GetContext().ScheduleMessage(
-            std::make_unique<FollowupMessage<std::remove_cvref_t<decltype(m_f)>, ActorRef<Actor>, A>>(
+            std::make_unique<FollowupMessage<std::remove_cvref_t<decltype(m_f)>, A>>(
                 m_recipient
               , std::move(m_f)
-              , std::make_tuple(m_recipient, std::forward<ResponseSchedulingArg<A>>(arg))
+              , std::make_tuple(std::forward<ResponseSchedulingArg<A>>(arg))
               , nullptr));
     }
     HasScheduledResponse() = true;
@@ -72,11 +72,11 @@ void EventualResponse<A>::ScheduleResponse()
 template <typename __T>
 template <typename C
         , typename... Args>
-requires Callable<C, Args...>
+requires Callable<C, ActorRef<Actor>, Args...>
       && (not DelayedReturn<C> or (std::is_copy_constructible_v<Args> and ...))
 struct EventualResponse<__T>::FollowupMessage: ActorContext::Task
 {
-    using RawR = std::invoke_result_t<C, Args...>;
+    using RawR = std::invoke_result_t<C, ActorRef<Actor>, Args...>;
     using R = DelayedReturnType<RawR>;
 
     void Let() override { LetCut(std::make_index_sequence<sizeof...(Args)>()); }
@@ -120,7 +120,7 @@ private:
                     // should the receiver decide to rewind to this exact message at
                     // some point in the future.
                     MaybeLater<R> delayedPossibly
-                        = std::invoke(m_f, Args{std::get<is>(m_args)}...);
+                        = std::invoke(m_f, m_wherein, Args{std::get<is>(m_args)}...);
 
                     if(delayedPossibly.HasValue())
                     {
@@ -184,18 +184,18 @@ private:
                 // std::is_same_v<RawR, R> == true.
                 else if constexpr(std::is_void_v<R>)
                 {
-                    std::invoke(m_f, std::forward<Args>(std::get<is>(m_args))...);
+                    std::invoke(m_f, m_wherein, std::forward<Args>(std::get<is>(m_args))...);
                     responseForwarded = ResponseSchedulingArg<R>{};
                 }
                 else if constexpr(std::is_lvalue_reference_v<R>)
                 {
                     responseForwarded.template emplace<std::reference_wrapper<std::remove_reference_t<R>>>(std::ref(
-                            std::invoke(m_f, std::forward<Args>(std::get<is>(m_args))...)));
+                            std::invoke(m_f, m_wherein, std::forward<Args>(std::get<is>(m_args))...)));
                 }
                 else
                 {
                     responseForwarded.template emplace<std::remove_reference_t<R>>(
-                            std::invoke(m_f, std::forward<Args>(std::get<is>(m_args))...));
+                            std::invoke(m_f, m_wherein, std::forward<Args>(std::get<is>(m_args))...));
                 }
             }
             catch(const std::exception& e)
@@ -449,16 +449,18 @@ requires Callable<R (S::*)(Params...), S&, std::remove_reference_t<Args>...>
     // as on the response infrastructure; the sender does not
     // immediately care about how a message gets back to him or
     // even whether he wants a response at all.
-    auto recall = [fn, cell = m_cell](std::remove_reference_t<Args>&&... args) -> R
+    auto recall = [](ActorRef<Actor> self, decltype(fn) __fn, std::remove_reference_t<Args>&&... args) -> R
     {
-        return (cell->LockActor().template Get<S>()->*fn)(std::forward<Args>(args)...);
+        return (self.m_cell->LockActor().template Get<S>()->*__fn)(std::forward<Args>(args)...);
     };
 
     m_cell->GetContext()->ScheduleMessage(
         std::make_unique<typename EventualResponse<R>::template
-                                  FollowupMessage<decltype(recall), std::remove_reference_t<Args>...>>(*this
+                                  FollowupMessage<decltype(recall)
+                                                , decltype(fn)
+                                                , std::remove_reference_t<Args>...>>(*this
          , std::move(recall)
-         , std::make_tuple(std::forward<Args>(args)...)
+         , std::make_tuple(fn, std::forward<Args>(args)...)
          , nullptr));
 }
 
@@ -479,16 +481,18 @@ requires Callable<R (S::*)(Params...) const, const S&, std::remove_reference_t<A
     // as on the response infrastructure; the sender does not
     // immediately care about how a message gets back to him or
     // even whether he wants a response at all.
-    auto recall = [fn, cell = m_cell](std::remove_reference_t<Args>&&... args) -> R
+    auto recall = [](ActorRef<Actor> self, decltype(fn) __fn, std::remove_reference_t<Args>&&... args) -> R
     {
-        return (cell->LockActor().template Get<const S>()->*fn)(std::forward<Args>(args)...);
+        return (self.m_cell->LockActor().template Get<const S>()->*__fn)(std::forward<Args>(args)...);
     };
 
     m_cell->GetContext()->ScheduleMessage(
         std::make_unique<typename EventualResponse<R>::template
-                                  FollowupMessage<decltype(recall), std::remove_reference_t<Args>...>>(*this
+                                  FollowupMessage<decltype(recall)
+                                                , decltype(fn)
+                                                , std::remove_reference_t<Args>...>>(*this
          , std::move(recall)
-         , std::make_tuple(std::forward<Args>(args)...)
+         , std::make_tuple(fn, std::forward<Args>(args)...)
          , nullptr));
 }
 
@@ -504,17 +508,17 @@ requires Callable<R (S::*)(Params...), S&, std::remove_reference_t<Args>...>
 {
     auto responseHandle = std::make_shared<EventualResponse<DelayedReturnType<R>>>(*this);
 
-    auto recall = [what, cell = who.m_cell](std::remove_reference_t<Args>&&... args) -> R
+    auto recall = [](ActorRef<Actor> self, decltype(what) __what, std::remove_reference_t<Args>&&... args) -> R
     {
-        return (cell->LockActor().template Get<S>()->*what)(std::forward<Args>(args)...);
+        return (self.m_cell->LockActor().template Get<S>()->*__what)(std::forward<Args>(args)...);
     };
 
     m_cell->GetContext()->ScheduleMessage(
         std::make_unique<typename EventualResponse<R>::template 
-                                  FollowupMessage<decltype(recall), std::remove_reference_t<Args>...>>(
+                                  FollowupMessage<decltype(recall), decltype(what), std::remove_reference_t<Args>...>>(
             who
           , std::move(recall)
-          , std::make_tuple(std::forward<Args>(args)...)
+          , std::make_tuple(what, std::forward<Args>(args)...)
           , responseHandle));
 
     return responseHandle;
@@ -532,17 +536,17 @@ requires Callable<R (S::*)(Params...) const, const S&, std::remove_reference_t<A
 {
     auto responseHandle = std::make_shared<EventualResponse<DelayedReturnType<R>>>(*this);
 
-    auto recall = [what, cell = who.m_cell](std::remove_reference_t<Args>&&... args) -> R
+    auto recall = [](ActorRef<Actor> self, decltype(what) __what, std::remove_reference_t<Args>&&... args) -> R
     {
-        return (cell->LockActor().template Get<const S>()->*what)(std::forward<Args>(args)...);
+        return (self.m_cell->LockActor().template Get<const S>()->*__what)(std::forward<Args>(args)...);
     };
 
     m_cell->GetContext()->ScheduleMessage(
         std::make_unique<typename EventualResponse<R>::template 
-                                  FollowupMessage<decltype(recall), std::remove_reference_t<Args>...>>(
+                                  FollowupMessage<decltype(recall), decltype(what), std::remove_reference_t<Args>...>>(
             who
           , std::move(recall)
-          , std::make_tuple(std::forward<Args>(args)...)
+          , std::make_tuple(what, std::forward<Args>(args)...)
           , responseHandle));
 
     return responseHandle;
