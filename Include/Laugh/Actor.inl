@@ -84,11 +84,13 @@ struct EventualResponse<__T>::FollowupMessage: ActorContext::Task
     FollowupMessage(ActorRef<Actor> wherein
                   , C f
                   , std::tuple<Args...>&& args
-                  , std::shared_ptr<EventualResponse<R>> responseHandle):
+                  , std::shared_ptr<EventualResponse<R>> responseHandle
+                  , bool isOldActorTerminated = true):
         m_wherein{std::move(wherein)}
       , m_f{std::move(f)}
       , m_args{std::move(args)}
       , m_responseHandle{responseHandle}
+      , m_isOldActorTerminated{isOldActorTerminated}
     {
     };
 
@@ -169,7 +171,8 @@ private:
                                                        // neither be known by the sender nor by the receiver
                                                        // once he decides to unstash and look at the
                                                        // arguments again.
-                                  , m_responseHandle));
+                                  , m_responseHandle
+                                  , false));
                         return;
                     }
                     else
@@ -225,7 +228,10 @@ private:
             // In any case, terminate the actor that's been swapped out and
             // left without any reference.
             // It still might decide to send some messages, so keep the lock intact.
-            cell.TerminateDyingActor();
+            if(m_isOldActorTerminated)
+            {
+                cell.TerminateDyingActor();
+            }
         }
 
         const auto& resp = m_responseHandle;
@@ -264,6 +270,7 @@ private:
     const C m_f;
     std::tuple<Args...> m_args;
     const std::shared_ptr<EventualResponse<R>> m_responseHandle;
+    const bool m_isOldActorTerminated;
 };
 
 

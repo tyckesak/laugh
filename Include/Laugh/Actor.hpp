@@ -1058,7 +1058,7 @@ struct EventualResponse
 {
     template <typename>
     friend struct EventualResponse;
-    friend ActorContext;
+    // friend ActorContext;
 
 
     // Return Type Case Analysis {{{
