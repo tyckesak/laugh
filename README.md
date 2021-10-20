@@ -24,7 +24,7 @@ Here is a short taste.
 
 ```cpp
 #include <iostream>
-#include "Actor.inl"
+#include <Laugh/Actor.inl>
 using namespace laugh;
 
 struct Counter: Actor
@@ -46,7 +46,7 @@ struct User: Actor
         
         // How far has the counter come so far?
         Ask(counter, &Counter::Increment)
-            ->AndThen([](int there)
+            ->AndThen([](ActorRef<Actor> self, int there)
         {
             std::cout << "So far, he's at " << there
                       << std::endl;
