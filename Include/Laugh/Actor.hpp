@@ -709,8 +709,9 @@ struct ActorCell
 
     std::unique_ptr<Actor>& GetActor() { return m_actor; }
 
-    std::unique_ptr<ActorContext::Task> UnstashTask();
     void StashTask(std::unique_ptr<ActorContext::Task> task);
+
+    void Unstash(int n);
 
 private:
 

@@ -176,24 +176,36 @@ ActorLock ActorCell::LockActor()
 }
 
 
-std::unique_ptr<ActorContext::Task> ActorCell::UnstashTask()
-{
-    if(m_stash.empty())
-    {
-        return nullptr;
-    }
-    else
-    {
-        std::unique_ptr<ActorContext::Task> ret{std::move(m_stash.front())};
-        m_stash.pop_front();
-        return std::move(ret);
-    }
-}
-
-
 void ActorCell::StashTask(std::unique_ptr<ActorContext::Task> task)
 {
     m_stash.push_back(std::move(task));
+}
+
+
+void ActorCell::Unstash(int n)
+{
+    if(n <= -2)
+    {
+        throw std::exception();
+    }
+
+    auto it = m_stash.begin();
+    auto last = m_stash.end();
+    std::advance(last, -1);
+
+    bool hasReachedEnd;
+
+    while(!(hasReachedEnd = hasReachedEnd || ++it == m_stash.end())
+       && n == -1? true : (n --> 0))
+    {
+        // Execute this loop one more time for the last
+        // known stashed element, if this is true.
+        hasReachedEnd = it == last;
+
+        (*it)->Let();
+
+        m_stash.erase(it);
+    }
 }
 
 
@@ -227,26 +239,16 @@ ActorCell::ActorCell(std::nullptr_t parent
 void Actor::UnstashAll()
 {
     auto cell = Self().m_cell;
-    while(auto tsk = cell->UnstashTask())
-    {
-        tsk->Let();
-    }
+    cell->Unstash(-1);
 }
 
 
 void Actor::Unstash(int n)
 {
-    if(n < 0)
-    {
-        throw std::exception();
-    }
-
     auto cell = Self().m_cell;
-    while(auto tsk = n --> 0? cell->UnstashTask() : nullptr)
-    {
-        tsk->Let();
-    }
+    cell->Unstash(n);
 }
 
 
 // }}}
+
