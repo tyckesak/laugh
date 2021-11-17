@@ -43,7 +43,7 @@ void EventualResponse<A>
     if constexpr(std::is_void_v<DelayedReturnType<A>>)
     {
         m_recipient.GetContext().ScheduleMessage(
-            std::make_unique<FollowupMessage<std::remove_cvref_t<decltype(m_f)>>>(
+            std::make_unique<FollowupMessage<std::remove_cvref_t<decltype(m_f)>, false>>(
                 m_recipient
               , std::move(m_f)
               , std::make_tuple()
@@ -52,7 +52,7 @@ void EventualResponse<A>
     else
     {
         m_recipient.GetContext().ScheduleMessage(
-            std::make_unique<FollowupMessage<std::remove_cvref_t<decltype(m_f)>, A>>(
+            std::make_unique<FollowupMessage<std::remove_cvref_t<decltype(m_f)>, false, A>>(
                 m_recipient
               , std::move(m_f)
               , std::make_tuple(std::forward<ResponseSchedulingArg<A>>(arg))
@@ -71,6 +71,7 @@ void EventualResponse<A>::ScheduleResponse()
 
 template <typename __T>
 template <typename C
+        , bool IsWeakReference
         , typename... Args>
 requires Callable<C, ActorRef<Actor>, Args...>
       && (not DelayedReturn<C> or (std::is_copy_constructible_v<Args> and ...))
@@ -110,7 +111,18 @@ private:
         std::optional<ResponseSchedulingArg<R>> responseForwarded;
 
         {
-            auto lck = m_wherein.LockActor();
+            ActorRef<Actor> strongRef;
+
+            if constexpr(IsWeakReference)
+            {
+                strongRef = ActorRef<Actor>{m_wherein};
+            }
+            else
+            {
+                strongRef = m_wherein;
+            }
+
+            auto lck = strongRef.LockActor();
             auto& cell = lck.m_cell;
             try
             {
@@ -122,7 +134,7 @@ private:
                     // should the receiver decide to rewind to this exact message at
                     // some point in the future.
                     MaybeLater<R> delayedPossibly
-                        = std::invoke(m_f, m_wherein, Args{std::get<is>(m_args)}...);
+                        = std::invoke(m_f, strongRef, Args{std::get<is>(m_args)}...);
 
                     if(delayedPossibly.HasValue())
                     {
@@ -156,8 +168,8 @@ private:
                         // the message.
                         // Return type analysis is a moot point here; it will be done once
                         // the actor decides to actually return something.
-                        cell.StashTask(std::make_unique<std::remove_reference_t<decltype(*this)>>(
-                                    m_wherein
+                        cell.StashTask(std::make_unique<std::remove_reference_t<FollowupMessage<C, true, Args...>>>(
+                                    strongRef
                                   , std::move(m_f)
                                   , std::move(m_args)  // <-- Observe that for _this_ reason right here,
                                                        // we need copy-constructible arguments in the
@@ -187,25 +199,25 @@ private:
                 // std::is_same_v<RawR, R> == true.
                 else if constexpr(std::is_void_v<R>)
                 {
-                    std::invoke(m_f, m_wherein, std::forward<Args>(std::get<is>(m_args))...);
+                    std::invoke(m_f, strongRef, std::forward<Args>(std::get<is>(m_args))...);
                     responseForwarded = ResponseSchedulingArg<R>{};
                 }
                 else if constexpr(std::is_lvalue_reference_v<R>)
                 {
                     responseForwarded.template emplace<std::reference_wrapper<std::remove_reference_t<R>>>(std::ref(
-                            std::invoke(m_f, m_wherein, std::forward<Args>(std::get<is>(m_args))...)));
+                            std::invoke(m_f, strongRef, std::forward<Args>(std::get<is>(m_args))...)));
                 }
                 else
                 {
                     responseForwarded.template emplace<std::remove_reference_t<R>>(
-                            std::invoke(m_f, m_wherein, std::forward<Args>(std::get<is>(m_args))...));
+                            std::invoke(m_f, strongRef, std::forward<Args>(std::get<is>(m_args))...));
                 }
             }
             catch(const std::exception& e)
             {
                 failed = true;
                 cell.Get()->Deactivate();
-                if(!m_wherein.GetParent()) [[unlikely]]
+                if(!strongRef.GetParent()) [[unlikely]]
                 {
                     // _This_ in all likelihood means that the program
                     // will call std::terminate next, since this exception is not
@@ -218,10 +230,10 @@ private:
                 else [[likely]]
                 {
                     // Send the exception up the chain of parents.
-                    m_wherein.GetParent()
+                    strongRef.GetParent()
                              .Bang(&Actor::OnChildFailed
                                  , Actor::ChildFailure{.m_why = std::current_exception()
-                                                     , .m_failed = m_wherein});
+                                                     , .m_failed = strongRef});
                 }
             }
 
@@ -266,7 +278,9 @@ private:
         }
     }
 
-    const ActorRef<Actor> m_wherein;
+
+
+    const ActorRef<Actor, IsWeakReference? ActorRefQuality::Weak : ActorRefQuality::Strong> m_wherein;
     const C m_f;
     std::tuple<Args...> m_args;
     const std::shared_ptr<EventualResponse<R>> m_responseHandle;
@@ -464,6 +478,7 @@ requires Callable<R (S::*)(Params...), S&, std::remove_reference_t<Args>...>
     m_cell->GetContext()->ScheduleMessage(
         std::make_unique<typename EventualResponse<R>::template
                                   FollowupMessage<decltype(recall)
+                                                , false
                                                 , decltype(fn)
                                                 , std::remove_reference_t<Args>...>>(*this
          , std::move(recall)
@@ -522,7 +537,7 @@ requires Callable<R (S::*)(Params...), S&, std::remove_reference_t<Args>...>
 
     m_cell->GetContext()->ScheduleMessage(
         std::make_unique<typename EventualResponse<R>::template 
-                                  FollowupMessage<decltype(recall), decltype(what), std::remove_reference_t<Args>...>>(
+                                  FollowupMessage<decltype(recall), false, decltype(what), std::remove_reference_t<Args>...>>(
             who
           , std::move(recall)
           , std::make_tuple(what, std::forward<Args>(args)...)
@@ -550,7 +565,7 @@ requires Callable<R (S::*)(Params...) const, const S&, std::remove_reference_t<A
 
     m_cell->GetContext()->ScheduleMessage(
         std::make_unique<typename EventualResponse<R>::template 
-                                  FollowupMessage<decltype(recall), decltype(what), std::remove_reference_t<Args>...>>(
+                                  FollowupMessage<decltype(recall), false, decltype(what), std::remove_reference_t<Args>...>>(
             who
           , std::move(recall)
           , std::make_tuple(what, std::forward<Args>(args)...)
@@ -614,13 +629,6 @@ template <ActorLike A, ActorRefQuality Q>
     return m_cell->GetParent();
 }
 
-
-template <ActorLike A, ActorRefQuality Q>
-    void ActorRef<A, Q>::Point(A& that)
-         requires (Q == ActorRefQuality::Strong)
-{
-    m_cell = that.Self().m_cell;
-}
 
 // }}}
 

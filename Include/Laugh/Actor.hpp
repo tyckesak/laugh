@@ -9,6 +9,9 @@
 #define Laugh_Actor_C317BB7F_D3FC_4A19_B6AB_CB26D5EEE948
 
 
+#include <iostream>
+
+
 #include <list>
 #include <mutex>
 #include <atomic>
@@ -286,6 +289,12 @@ private:
     std::shared_mutex m_workSchedule;
     /// The message queue itself.
     moodycamel::ConcurrentQueue<std::unique_ptr<Task>> m_unassigned;
+    /// An exact count of how many tasks are waiting to be assigned.
+    std::atomic_int64_t m_unassignedCount;
+    /// New messages must be enqueued synchronously, and threads
+    /// must not pop from the queue while some thread is in the process
+    /// of enqueuing a message.
+    moodycamel::ProducerToken m_producerChip;
 };
 
 
@@ -549,17 +558,6 @@ struct ActorRef
 
     // }}}
 
-
-    ///
-    /// \brief Makes this reference point to another actor.
-    ///
-    /// \note The new actor must already be managed by some other
-    ///       ActorRef.
-    ///
-    void Point(A&)
-         requires (RefQuality == ActorRefQuality::Strong);
-
-
     // Variations on 'Bang' {{{
 
 
@@ -718,9 +716,21 @@ private:
     ActorRef<Actor, ActorRefQuality::Weak> m_selfReference;
     const std::optional<ActorRef<Actor, ActorRefQuality::Strong>> m_parent;
     std::unique_ptr<Actor> m_actor;
+    /// The swapped-out actor, needed to guarantee that some leftover messages
+    /// reach it.
     std::unique_ptr<Actor> m_dyingActor;
+    /// The recorded static function which default-constructs another actor,
+    /// if applicable.
     std::unique_ptr<Actor> (* m_defaultConstruct)();
     std::list<std::unique_ptr<ActorContext::Task>> m_stash;
+    ///
+    /// Counts the number of total stashed messages.
+    ///
+    /// A seperate count turns out to be necessary because the Unstash
+    /// functions might be called recursively.
+    ///
+    std::uint64_t m_toUnstash = 0;
+    /// The mutex that does the actual actor synchronization.
     ActorMutex m_blocking;
     /// \brief Reference to context. Stays pretty much the same once set.
     ActorContext* m_context;
@@ -1134,6 +1144,7 @@ struct EventualResponse
     /// \tparam Args Argument types to the callable object.
     ///
     template <typename C
+            , bool IsWeakReference
             , typename... Args>
     requires Callable<C, ActorRef<Actor>, Args...>
           && (not DelayedReturn<C> or (std::is_copy_constructible_v<Args> and ...))

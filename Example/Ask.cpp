@@ -88,6 +88,7 @@ struct PatientBoss: Actor
 
         // Catch up on calculating those prime numbers that we could not do
         // because of a worker shortage.
+        // If the unstashing process causes the member function to
         UnstashAll();
 
         // 'Ask' is only available as a protected method inside Actor
@@ -161,9 +162,9 @@ int main()
 
 
     // Make 100 child workers (actors).
-    boss.Bang(&PatientBoss::Hire, 100 + 2);
+    boss.Bang(&PatientBoss::Hire, 101 + 2);
 
-    for(int i = 5000; i < 5000 + 100; ++i)
+    for(int i = 5000; i <= 5000 + 100; ++i)
     {
         // Messages are pointers to any member function of a class deriving
         // from Actor, and arguments to the invocation are forwarded along

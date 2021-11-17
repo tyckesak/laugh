@@ -1,13 +1,17 @@
 #include "Laugh/Actor.inl"
 
+#include <limits>
 #include <numeric>
+#include <iostream>
 
 using namespace laugh;
 
 // ActorContext {{{
 
 
-ActorContext::ActorContext(int workers)
+ActorContext::ActorContext(int workers):
+    m_unassigned()
+  , m_producerChip(m_unassigned)
 {
     m_terminationDesired.clear();
     for(int i = 0; i < workers; ++i)
@@ -56,11 +60,16 @@ void ActorContext::WorkerRun(std::atomic_flag* isWorkerEnrolled)
 
             m_hasWork.wait(lk, [&info, &current, this]()
             {
-                const bool willWork = !(info.m_waiting = !m_unassigned.try_dequeue(current));
+                m_unassigned.try_dequeue(current);
+                const bool willWork = !(info.m_waiting = current == nullptr);
+                if(willWork)
+                {
+                    --m_unassignedCount;
+                }
+
                 if (m_terminationDesired.test())
                 {
-                    const bool threadsIdling = std::accumulate(m_threadsInfo.cbegin(), m_threadsInfo.cend(), true, [](bool c, const auto& pair) -> bool { return c && pair.second.m_waiting; });
-                    return willWork || threadsIdling; 
+                    return willWork || m_unassignedCount.load() == 0; 
                 }
                 else
                 {
@@ -69,22 +78,24 @@ void ActorContext::WorkerRun(std::atomic_flag* isWorkerEnrolled)
             });
         }
 
-        m_hasWork.notify_all();
+        // The worker has succeeded in dequeuing a message, or has
+        // determined in a volatile manner that all other worker threads
+        // are idling.
+        // m_hasWork.notify_all();
 
         if(current)
         {
+            // Execute and delete the message, start anew.
             current->Let();
-        }
-
-        m_hasWork.notify_all();
-
-        if(!current)
-        {
-            break;
+            current = nullptr;
+            continue;
         }
         else
         {
-            current = nullptr;
+            // This thread has been allowed to die, notify all other worker
+            // threads stuck in the wait call above so that they may follow suit.
+            m_hasWork.notify_all();
+            break;
         }
     }
 }
@@ -109,8 +120,9 @@ void ActorContext::ScheduleMessage(std::unique_ptr<Task>&& task)
 {
     {
         std::lock_guard<std::shared_mutex> lck{m_workSchedule};
-        m_unassigned.enqueue(std::move(task));
+        m_unassigned.enqueue(m_producerChip, std::move(task));
     }
+    ++m_unassignedCount;
     m_hasWork.notify_all();
 }
 
@@ -188,23 +200,78 @@ void ActorCell::Unstash(int n)
     {
         throw std::exception();
     }
+    else if(m_toUnstash != 0)
+    {
+        if(n > 0)
+        {
+            // Overflow-safe addition necessary.
+            // Unsigned integers are added modulo this big number.
+            // See C++ specification.
+            m_toUnstash = m_toUnstash + static_cast<decltype(m_toUnstash)>(n) < m_toUnstash?
+                          std::numeric_limits<decltype(m_toUnstash)>::max() :
+                          m_toUnstash + static_cast<decltype(m_toUnstash)>(n);
+        }
+        else if(n == -1)
+        {
+            m_toUnstash = std::numeric_limits<decltype(m_toUnstash)>::max();
+        }
+        return;
+    }
+    else if(n == 0)
+    {
+        return;
+    }
+
+
+    // RAII cleanup of the unstash count.
+    // Reset it to zero in any case once this function
+    // returns from this point on.
+    struct UnstashCountReset
+    {
+        ActorCell& m_cell;
+        UnstashCountReset(ActorCell& cell): m_cell{cell} {}
+        ~UnstashCountReset()
+        {
+            m_cell.m_toUnstash = 0;
+        }
+    } _{*this};
+
 
     auto it = m_stash.begin();
     auto last = m_stash.end();
-    std::advance(last, -1);
 
-    bool hasReachedEnd;
+    if(it == last)
+    {
+        // No messages to unstash, forgo std::advance, return early.
+        return;
+    }
+    else
+    {
+        std::advance(last, -1);
+    }
 
-    while(!(hasReachedEnd = hasReachedEnd || ++it == m_stash.end())
-       && n == -1? true : (n --> 0))
+
+    m_toUnstash = n > 0? n : std::numeric_limits<decltype(m_toUnstash)>::max();
+
+    while(it != m_stash.end()
+       && (m_toUnstash == std::numeric_limits<decltype(m_toUnstash)>::max()? true : (m_toUnstash --> 0)))
     {
         // Execute this loop one more time for the last
-        // known stashed element, if this is true.
-        hasReachedEnd = it == last;
+        // known stashed element, if this is true,
+        // and quit the loop after this message.
+        const bool hasReachedKnownEnd = it == last;
 
-        (*it)->Let();
+        std::unique_ptr<ActorContext::Task> tsk{std::move(*it)};
+        // Erase the now invalid pointer from the stash before
+        // executing the message; it could throw an exception after all
+        it = m_stash.erase(it);
+        tsk->Let();
+        tsk = nullptr;
 
-        m_stash.erase(it);
+        if(hasReachedKnownEnd)
+        {
+            break;
+        }
     }
 }
 
@@ -216,6 +283,7 @@ ActorCell::ActorCell(const ActorRef<Actor>& parent
   , m_defaultConstruct{nullptr}
   , m_actor{nullptr}
   , m_selfReference()
+  , m_toUnstash(0)
 {
 }
 
